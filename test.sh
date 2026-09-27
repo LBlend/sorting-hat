@@ -528,7 +528,13 @@ teardown_file() {
 @test "video: sampled frames are sent as vision inputs" {
   command -v ffmpeg >/dev/null || skip "ffmpeg is not installed"
   local video="$BATS_TEST_TMPDIR/frames.mp4"
-  ffmpeg -v error -f lavfi -i color=c=red:s=64x64:d=1 -frames:v 12 -c:v mpeg4 -y "$video"
+  local mockbin="$BATS_TEST_TMPDIR/ocr-bin"
+  mkdir -p "$mockbin"
+  printf '%s\n' '#!/bin/sh' 'printf "DEMO TITLE 42"' > "$mockbin/tesseract"
+  chmod +x "$mockbin/tesseract"
+  PATH="$mockbin:$PATH"
+  export PATH
+  ffmpeg -v error -f lavfi -i color=c=red:s=64x64:d=2 -frames:v 24 -c:v mpeg4 -y "$video"
   local content_file
   content_file=$(build_user_content "$video" "video" "Name this clip")
   run python3 - "$content_file" <<'PY'
@@ -536,7 +542,8 @@ import json, sys
 with open(sys.argv[1]) as f:
     content = json.load(f)
 assert isinstance(content, list)
-assert any(part.get('type') == 'image_url' for part in content)
+assert sum(part.get('type') == 'image_url' for part in content) == 12
+assert 'DEMO TITLE 42' in content[0]['text']
 PY
   rm -f "$content_file"
   assert_success

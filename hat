@@ -183,26 +183,39 @@ if mode == "image":
 elif mode == "video":
   content = prompt
   try:
-    import subprocess
+    import shutil, subprocess
     probe = subprocess.run(
       ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
        '-of', 'default=noprint_wrappers=1:nokey=1', file],
       capture_output=True, text=True, timeout=10
     )
     duration = float(probe.stdout.strip()) if probe.returncode == 0 else 0
-    timestamps = [duration * i / 6 for i in range(1, 6)] if duration > 0 else [0]
+    frame_count = 12
+    timestamps = [duration * i / (frame_count + 1) for i in range(1, frame_count + 1)] if duration > 0 else [0]
     frames = []
+    ocr_lines = []
     for timestamp in timestamps:
       frame = subprocess.run(
         ['ffmpeg', '-v', 'error', '-ss', f'{timestamp:.3f}', '-i', file,
-                 '-frames:v', '1', '-vf', 'scale=512:512:force_original_aspect_ratio=decrease', '-f', 'image2pipe',
+                 '-frames:v', '1', '-vf', 'scale=1024:1024:force_original_aspect_ratio=decrease', '-f', 'image2pipe',
          '-vcodec', 'mjpeg', 'pipe:1'],
         capture_output=True, timeout=30
       )
       if frame.returncode == 0 and frame.stdout:
         frames.append(frame.stdout)
+        if shutil.which('tesseract'):
+          ocr = subprocess.run(
+            ['tesseract', 'stdin', 'stdout', '--psm', '6'],
+            input=frame.stdout, capture_output=True, timeout=15
+          )
+          text = ocr.stdout.decode('utf-8', errors='replace').strip()
+          if ocr.returncode == 0 and text:
+            ocr_lines.append(f'{timestamp:.1f}s: {text[:500]}')
     if frames:
-      content = [{'type': 'text', 'text': prompt + '\n\nSampled video frames:'}]
+      text_prompt = prompt + '\n\nSampled video frames:'
+      if ocr_lines:
+        text_prompt += '\n\nOn-screen text detected by OCR (may be incomplete):\n' + '\n'.join(ocr_lines)
+      content = [{'type': 'text', 'text': text_prompt}]
       content.extend({
         'type': 'image_url',
         'image_url': {'url': 'data:image/jpeg;base64,' + base64.b64encode(frame).decode()}
@@ -522,7 +535,9 @@ build_payload() {
 
   local prompt="Suggest a single appropriate filename. Rules:
 - Use lowercase with hyphens (kebab-case), no spaces
-- Be descriptive but concise (2-5 words)
+- Use 3-6 words and name the main subject, action, and setting or distinctive detail when available
+- Prefer specific visual details, on-screen text, and spoken names or topics over generic descriptions
+- Avoid generic words like video, clip, scene, or footage unless they are part of the subject's name
 - $ext_instruction
 - Reply with ONLY the filename, nothing else"
 

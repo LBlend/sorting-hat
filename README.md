@@ -73,11 +73,11 @@ Works with any OpenAI-compatible API: local servers (llama.cpp, Ollama, vLLM, LM
 
 ### Video Recognition
 
-For each video, `ffprobe` reads available container tags and stream details such as duration, resolution, and codecs. `ffmpeg` then samples up to five frames at evenly spaced points through the clip and scales each frame to fit within 512 × 512 pixels. These frames are sent as image inputs to the configured OpenAI-compatible LLM endpoint, which needs a vision-capable model to recognize the scenes. The video itself is not uploaded as a video file.
+For each video, `ffprobe` reads available container tags and stream details such as duration, resolution, and codecs. `ffmpeg` then samples up to twelve frames at evenly spaced points through the clip and scales each frame to fit within 1024 × 1024 pixels. If Tesseract is installed, Sorting Hat also runs local OCR on those frames and adds detected text to the naming context. The frames are sent as image inputs to the configured OpenAI-compatible LLM endpoint, which needs a vision-capable model to recognize scenes. The video itself is not uploaded as a video file.
 
 When the clip has an audio stream and the local `whisper` command is installed, Sorting Hat extracts mono 16 kHz audio and transcribes it locally. The transcript is included with the metadata in the naming context (up to 6,000 characters). Whisper defaults to its `tiny` model; it may download that model the first time it runs. Transcription can take time, especially on longer clips or slower machines.
 
-**Recommended: install Whisper** if your videos contain speech or narration. Install FFmpeg first, then install OpenAI Whisper in the Python environment whose `bin` directory is on your `PATH`:
+**Recommended: install Tesseract and Whisper** for videos with on-screen text, speech, or narration. OCR and transcription run locally; install the Tesseract command-line tool and FFmpeg, then install OpenAI Whisper in the Python environment whose `bin` directory is on your `PATH`:
 
 ```bash
 python3 -m pip install -U openai-whisper
@@ -93,6 +93,7 @@ This enables local transcription; only the sampled video frames are sent to your
 - For image naming: a vision-capable model (e.g., GPT-4o, LLaVA, Qwen-VL)
 - Optional: `Pillow` (`pip install Pillow`) for EXIF metadata extraction from images
 - Optional: `ffmpeg` / `ffprobe` for video frame sampling and media metadata
+- Optional: Tesseract OCR (`tesseract` command) for extracting on-screen video text
 - Optional: OpenAI Whisper's `whisper` CLI for local video audio transcription
 
 ## Installation
