@@ -122,6 +122,8 @@ Set these environment variables (or export them in your shell profile):
 | `HAT_MODEL` | `Qwen3.5-9b` | Model name to use |
 | `HAT_API_KEY` | *(empty)* | API key (optional, for cloud providers) |
 | `HAT_REASONING_BUDGET` | `1024` | Reasoning token budget for naming (`-1` for unlimited) |
+| `HAT_VIDEO_TRANSCRIBE` | `1` | Set to `0` to disable local Whisper transcription for videos |
+| `HAT_WHISPER_MODEL` | `tiny` | Whisper model used for local video transcription |
 
 ### Example configurations
 
