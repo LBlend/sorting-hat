@@ -180,9 +180,37 @@ if mode == "image":
         {'type': 'image_url', 'image_url': {'url': f'data:{mime};base64,{b64}'}},
         {'type': 'text', 'text': prompt}
     ]
-elif mode in ("audio", "video"):
-    # Audio/video files can't be passed to the LLM directly — metadata was
-    # already injected into the prompt by collect_metadata().
+elif mode == "video":
+  content = prompt
+  try:
+    import subprocess
+    probe = subprocess.run(
+      ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+       '-of', 'default=noprint_wrappers=1:nokey=1', file],
+      capture_output=True, text=True, timeout=10
+    )
+    duration = float(probe.stdout.strip()) if probe.returncode == 0 else 0
+    timestamps = [duration * i / 6 for i in range(1, 6)] if duration > 0 else [0]
+    frames = []
+    for timestamp in timestamps:
+      frame = subprocess.run(
+        ['ffmpeg', '-v', 'error', '-ss', f'{timestamp:.3f}', '-i', file,
+                 '-frames:v', '1', '-vf', 'scale=512:512:force_original_aspect_ratio=decrease', '-f', 'image2pipe',
+         '-vcodec', 'mjpeg', 'pipe:1'],
+        capture_output=True, timeout=30
+      )
+      if frame.returncode == 0 and frame.stdout:
+        frames.append(frame.stdout)
+    if frames:
+      content = [{'type': 'text', 'text': prompt + '\n\nSampled video frames:'}]
+      content.extend({
+        'type': 'image_url',
+        'image_url': {'url': 'data:image/jpeg;base64,' + base64.b64encode(frame).decode()}
+      } for frame in frames)
+  except Exception:
+    pass
+elif mode == "audio":
+  # Audio files are represented by metadata from collect_metadata().
     content = prompt
 else:
     with open(file, 'r', errors='replace') as f:
@@ -421,6 +449,10 @@ elif mode == 'video':
             probe = json.loads(result.stdout)
             fmt = probe.get('format', {})
             tags = {k.lower(): v for k, v in fmt.get('tags', {}).items()}
+            has_audio = any(
+                stream.get('codec_type') == 'audio'
+                for stream in probe.get('streams', [])
+            )
             for key in ('title', 'comment', 'date', 'artist', 'album'):
                 if tags.get(key):
                     meta[key] = tags[key][:100]
@@ -442,6 +474,32 @@ elif mode == 'video':
                             if int(d) > 0:
                                 meta['fps'] = str(round(int(n) / int(d), 2))
                     break
+            if (has_audio and
+                    os.environ.get('HAT_VIDEO_TRANSCRIBE', '1').lower() not in ('0', 'false', 'no')):
+                import shutil
+                import tempfile
+                if shutil.which('whisper'):
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        audio_file = os.path.join(tmpdir, 'audio.wav')
+                        extracted = subprocess.run(
+                            ['ffmpeg', '-v', 'error', '-i', file, '-vn', '-ac', '1',
+                             '-ar', '16000', '-f', 'wav', '-y', audio_file],
+                            capture_output=True, timeout=120
+                        )
+                        if extracted.returncode == 0:
+                            transcribed = subprocess.run(
+                                ['whisper', audio_file, '--model',
+                                 os.environ.get('HAT_WHISPER_MODEL', 'tiny'),
+                                 '--output_format', 'txt', '--output_dir', tmpdir,
+                                 '--fp16', 'False'],
+                                capture_output=True, text=True, timeout=1800
+                            )
+                            transcript_file = os.path.join(tmpdir, 'audio.txt')
+                            if transcribed.returncode == 0 and os.path.isfile(transcript_file):
+                                with open(transcript_file, encoding='utf-8') as transcript:
+                                    text = transcript.read().strip()
+                                if text:
+                                    meta['transcript'] = text[:6000]
     except Exception:
         pass
 print(json.dumps(meta, ensure_ascii=False))

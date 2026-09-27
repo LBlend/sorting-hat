@@ -30,7 +30,7 @@ Works with any OpenAI-compatible API: local servers (llama.cpp, Ollama, vLLM, LM
 ## Changelog
 
 - Guard against stem-less dotfile rename when the model returns nothing usable (#32)
-- Video file support: MP4, MKV, WebM, AVI, MOV, etc. — named from `ffprobe` metadata (#30)
+- Video understanding: sampled frames sent to vision models, with optional local Whisper transcripts
 - `--preview` / `-p` flag prints a content snippet to stderr before the hat animation (#28)
 - Fix `is_audio` false-positives for MP4 / HEIC / MOV — check ftyp major brand (#27)
 - Audio file support: MP3, WAV, FLAC, OGG, AAC, M4A — named from `ffprobe` tags (#20)
@@ -69,9 +69,21 @@ Works with any OpenAI-compatible API: local servers (llama.cpp, Ollama, vLLM, LM
 | **Images** (JPEG, PNG, SVG) | Base64-encoded and sent via the multimodal API |
 | **Images** (WebP, BMP, TIFF, GIF) | Converted to PNG via Pillow, then sent as above |
 | **Audio** (MP3, FLAC, OGG, AAC, WAV, M4A, Opus, WMA, AIFF, APE) | Not sent to the LLM directly — named from embedded tags (title/artist/album/genre/date + duration) read via `ffprobe` |
-| **Video** (MP4, MKV, WebM, AVI, MOV, M4V, WMV, FLV, MPEG, MPG, 3GP, OGV, TS, MTS, M2TS) | Not sent to the LLM directly — named from `ffprobe` metadata (codec, duration, resolution, container tags) |
+| **Video** (MP4, MKV, WebM, AVI, MOV, M4V, WMV, FLV, MPEG, MPG, 3GP, OGV, TS, MTS, M2TS) | Combines container metadata, sampled visual frames, and (when available) a speech transcript to describe the clip. |
 
-Image naming requires a vision-capable model (e.g. `llava`). Audio and video naming require `ffprobe` (from FFmpeg) for metadata extraction; images additionally include any EXIF metadata in the prompt.
+### Video Recognition
+
+For each video, `ffprobe` reads available container tags and stream details such as duration, resolution, and codecs. `ffmpeg` then samples up to five frames at evenly spaced points through the clip and scales each frame to fit within 512 × 512 pixels. These frames are sent as image inputs to the configured OpenAI-compatible LLM endpoint, which needs a vision-capable model to recognize the scenes. The video itself is not uploaded as a video file.
+
+When the clip has an audio stream and the local `whisper` command is installed, Sorting Hat extracts mono 16 kHz audio and transcribes it locally. The transcript is included with the metadata in the naming context (up to 6,000 characters). Whisper defaults to its `tiny` model; it may download that model the first time it runs. Transcription can take time, especially on longer clips or slower machines.
+
+**Recommended: install Whisper** if your videos contain speech or narration. Install FFmpeg first, then install OpenAI Whisper in the Python environment whose `bin` directory is on your `PATH`:
+
+```bash
+python3 -m pip install -U openai-whisper
+```
+
+This enables local transcription; only the sampled video frames are sent to your configured LLM endpoint. Set `HAT_VIDEO_TRANSCRIBE=0` to disable transcription or `HAT_WHISPER_MODEL` to choose another Whisper model (for example, `base` for a larger model). Video frame recognition requires `ffmpeg` and a vision-capable model. Audio and video metadata use `ffprobe`; images additionally include any EXIF metadata in the prompt.
 
 ## Requirements
 
@@ -80,7 +92,8 @@ Image naming requires a vision-capable model (e.g. `llava`). Audio and video nam
 - An OpenAI-compatible LLM API endpoint
 - For image naming: a vision-capable model (e.g., GPT-4o, LLaVA, Qwen-VL)
 - Optional: `Pillow` (`pip install Pillow`) for EXIF metadata extraction from images
-- Optional: `ffprobe` (from `ffmpeg`) for richer audio metadata (tags, duration, bitrate, codec)
+- Optional: `ffmpeg` / `ffprobe` for video frame sampling and media metadata
+- Optional: OpenAI Whisper's `whisper` CLI for local video audio transcription
 
 ## Installation
 

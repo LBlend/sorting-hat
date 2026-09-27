@@ -16,7 +16,8 @@ setup_file() {
   eval "$(sed -n '/^is_audio/,/^}/p' "$HAT")"
   eval "$(sed -n '/^is_video/,/^}/p' "$HAT")"
   eval "$(sed -n '/^collect_metadata/,/^}/p' "$HAT")"
-  export -f sanitize_name is_binary is_image is_audio is_video collect_metadata
+  eval "$(sed -n '/^build_user_content/,/^}/p' "$HAT")"
+  export -f sanitize_name is_binary is_image is_audio is_video collect_metadata build_user_content
 
   # Start mock LLM server that handles multi-turn conversations
   export MOCK_PORT=18950
@@ -522,6 +523,45 @@ teardown_file() {
 @test "video: mkv is processed (not skipped as binary)" {
   run bash -c "LLM_BASE_URL=http://127.0.0.1:$MOCK_PORT bash '$HAT' --quiet --dry-run --force '$TEST_ASSETS/sample.mkv' 2>/dev/null"
   assert_output "suggested-name.mkv"
+}
+
+@test "video: sampled frames are sent as vision inputs" {
+  command -v ffmpeg >/dev/null || skip "ffmpeg is not installed"
+  local video="$BATS_TEST_TMPDIR/frames.mp4"
+  ffmpeg -v error -f lavfi -i color=c=red:s=64x64:d=1 -frames:v 12 -c:v mpeg4 -y "$video"
+  local content_file
+  content_file=$(build_user_content "$video" "video" "Name this clip")
+  run python3 - "$content_file" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    content = json.load(f)
+assert isinstance(content, list)
+assert any(part.get('type') == 'image_url' for part in content)
+PY
+  rm -f "$content_file"
+  assert_success
+}
+
+@test "video: local Whisper transcript is included when available" {
+  command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null || skip "FFmpeg is not installed"
+  local video="$BATS_TEST_TMPDIR/speech.mp4"
+  local mockbin="$BATS_TEST_TMPDIR/mockbin"
+  mkdir -p "$mockbin"
+  ffmpeg -v error -f lavfi -i color=c=blue:s=64x64:d=1 \
+    -f lavfi -i sine=frequency=440:duration=1 -shortest -c:v mpeg4 -c:a aac -y "$video"
+  printf '%s\n' '#!/bin/sh' 'outdir=' \
+    'while [ "$#" -gt 0 ]; do' \
+    '  case "$1" in' \
+    '    --output_dir) outdir="$2"; shift 2 ;;' \
+    '    *) shift ;;' \
+    '  esac' \
+    'done' \
+    'printf "%s" "transcribed speech" > "$outdir/audio.txt"' > "$mockbin/whisper"
+  chmod +x "$mockbin/whisper"
+  PATH="$mockbin:$PATH"
+  export HAT_VIDEO_TRANSCRIBE=1
+  run collect_metadata "$video" "video"
+  assert_output --partial '"transcript": "transcribed speech"'
 }
 
 # ── Preview flag ─────────────────────────────────────────────────────
